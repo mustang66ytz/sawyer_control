@@ -74,6 +74,38 @@ class LowLevelMotion(object):
 
         rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
 
+        # move the robot based on joint command
+    def basicTrajMove(self, positions, speed, traj_length):
+        pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
+        sub = rospy.Subscriber('/robot/joint_states', JointState, self.joints_callback)
+        rate = rospy.Rate(10)
+        # define the speed publisher
+        pub_speed_ratio = rospy.Publisher('/robot/limb/right/set_speed_ratio', Float64, latch=True, queue_size=10)
+
+        command = JointCommand()
+        command.names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
+        command.mode = 1
+        # customize the value to change speed
+        pub_speed_ratio.publish(speed)
+        
+        control_diff_record = 10.0
+        control_diff_temp = 0.0
+        threshold = 0.015
+
+        # terminate the control once the arm moved to the desired joint space within the threshold
+        counter = 0
+        while control_diff_record>threshold and counter<traj_length:
+            command.position = [positions[counter]['right_j0'], positions[counter]['right_j1'], positions[counter]['right_j2'], positions[counter]['right_j3'], positions[counter]['right_j4'], positions[counter]['right_j5'], positions[counter]['right_j6']]
+            pub.publish(command)
+            for x,y in zip(self.jointAngles, command.position):
+                control_diff_temp = abs(x-y) + control_diff_temp
+            control_diff_record = control_diff_temp
+            control_diff_temp = 0.0
+            rate.sleep()
+            counter = counter+1
+
+        rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
+
     # this function is for moving the lower arm only to fulfill high frequency requirement for some massage patterns
     def lowerArmBasicMove(self, cur_pos, speed):
         # define some parameters:
@@ -245,15 +277,15 @@ class LowLevelMotion(object):
         return disp
 
     def moveACircle(self, wayPoint, move_speed):
-        curr_roll = 1.1667*math.pi
-        curr_pitch = 0
+        curr_roll = [7*math.pi/6, 27*math.pi/24, 13*math.pi/12, 25*math.pi/24, math.pi, 23*math.pi/24, 11*math.pi/12, 21*math.pi/24, 5*math.pi/6, 21*math.pi/24, 11*math.pi/12, 23*math.pi/24, math.pi, 25*math.pi/24, 13*math.pi/12, 27*math.pi/24, 7*math.pi/6]
+        curr_pitch = [0, math.pi/24, math.pi/12, 3*math.pi/24, math.pi/6, 3*math.pi/24, math.pi/12, math.pi/24, 0, -math.pi/24, -math.pi/12, -3*math.pi/24, -math.pi/6, -3*math.pi/24, -math.pi/12, -math.pi/24, 0]
         curr_yaw = 0
-        time = 0
+        i = 0
         circle_points = []
         circle_points_joints = []
         
-        for time in range (0,5):
-            end = self.to_quaternion(curr_roll, curr_pitch, curr_yaw)
+        for i in range (0,len(curr_roll)):
+            end = self.to_quaternion(curr_roll[i], curr_pitch[i], curr_yaw)
             pose = Pose()
             pose.position.x = self.positioning_pose.position.x
             pose.position.y = self.positioning_pose.position.y
@@ -262,29 +294,11 @@ class LowLevelMotion(object):
             pose.orientation.y = end[1]
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
-
             circle_points.append(pose)
-
-            if time==0:
-                curr_roll = 7*math.pi/6
-                curr_pitch = 0
-            elif time == 1:
-                curr_roll = math.pi
-                curr_pitch = math.pi/6
-            elif time == 2:
-                curr_roll = 5*math.pi/6
-                curr_pitch = 0
-            elif time == 3:
-                curr_roll = math.pi
-                curr_pitch = -math.pi/6
-            else:
-                curr_roll = 7*math.pi/6
-                curr_pitch = 0
 
         for circle_point in circle_points:
             circle_points_joints.append(self.waypointToJoint(circle_point))
-        for circle_point_joint in circle_points_joints:
-            self.basicPositionMove(circle_point_joint, move_speed)
+        self.basicTrajMove(circle_points_joints, move_speed, len(curr_pitch))
 
     # below are some modularized massage patterns:
 
@@ -363,12 +377,11 @@ class LowLevelMotion(object):
             # move to the position specified by the desired force
             self.positioning_the_endpoint_to_force(5)
             # move a circle
-            self.moveACircle(self.positioning_pose, move_speed*2)
+            self.moveACircle(self.positioning_pose, move_speed+0.05)
             # lift up the arm
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
         
-
 
 if __name__ == '__main__':
     try:
