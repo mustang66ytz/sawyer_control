@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 import rospy
+import numpy as np
 import math
+from scipy import interpolate
+import matplotlib.pyplot as plt
 from std_msgs.msg import (
     Float64,
     Header
@@ -78,7 +81,7 @@ class LowLevelMotion(object):
     def basicTrajMove(self, positions, speed, traj_length):
         pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
         sub = rospy.Subscriber('/robot/joint_states', JointState, self.joints_callback)
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(40)
         # define the speed publisher
         pub_speed_ratio = rospy.Publisher('/robot/limb/right/set_speed_ratio', Float64, latch=True, queue_size=10)
 
@@ -94,7 +97,7 @@ class LowLevelMotion(object):
 
         # terminate the control once the arm moved to the desired joint space within the threshold
         counter = 0
-        while control_diff_record>threshold and counter<traj_length:
+        while control_diff_record>threshold and counter<traj_length-1:
             command.position = [positions[counter]['right_j0'], positions[counter]['right_j1'], positions[counter]['right_j2'], positions[counter]['right_j3'], positions[counter]['right_j4'], positions[counter]['right_j5'], positions[counter]['right_j6']]
             pub.publish(command)
             for x,y in zip(self.jointAngles, command.position):
@@ -277,15 +280,24 @@ class LowLevelMotion(object):
         return disp
 
     def moveACircle(self, wayPoint, move_speed):
-        curr_roll = [7*math.pi/6, 27*math.pi/24, 13*math.pi/12, 25*math.pi/24, math.pi, 23*math.pi/24, 11*math.pi/12, 21*math.pi/24, 5*math.pi/6, 21*math.pi/24, 11*math.pi/12, 23*math.pi/24, math.pi, 25*math.pi/24, 13*math.pi/12, 27*math.pi/24, 7*math.pi/6]
-        curr_pitch = [0, math.pi/24, math.pi/12, 3*math.pi/24, math.pi/6, 3*math.pi/24, math.pi/12, math.pi/24, 0, -math.pi/24, -math.pi/12, -3*math.pi/24, -math.pi/6, -3*math.pi/24, -math.pi/12, -math.pi/24, 0]
+        # define some key way points of the circle
+        rolls_start_position = 7*math.pi/6
+        rolls_end_position = 5*math.pi/6
+        pitch_start_position = 0
+        pitch_end_position = 0
+        number_of_interpolation = 30
         curr_yaw = 0
+        # the first half circle
+        rolls = [rolls_start_position, math.pi, rolls_end_position]
+        pitches = [pitch_start_position, math.pi/6, pitch_end_position]
+
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        rolls_new = np.linspace(rolls_start_position, rolls_end_position, number_of_interpolation)
         i = 0
-        circle_points = []
         circle_points_joints = []
         
-        for i in range (0,len(curr_roll)):
-            end = self.to_quaternion(curr_roll[i], curr_pitch[i], curr_yaw)
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
             pose = Pose()
             pose.position.x = self.positioning_pose.position.x
             pose.position.y = self.positioning_pose.position.y
@@ -294,11 +306,96 @@ class LowLevelMotion(object):
             pose.orientation.y = end[1]
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
-            circle_points.append(pose)
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
 
-        for circle_point in circle_points:
-            circle_points_joints.append(self.waypointToJoint(circle_point))
-        self.basicTrajMove(circle_points_joints, move_speed, len(curr_pitch))
+        # the second half circle
+        rolls = [rolls_end_position, math.pi, rolls_start_position]
+        pitches = [pitch_end_position, -math.pi/6, pitch_start_position]
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        rolls_new = np.linspace(rolls_end_position, rolls_start_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = self.positioning_pose.position.x
+            pose.position.y = self.positioning_pose.position.y
+            pose.position.z = self.positioning_pose.position.z
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+
+    def moveACircleCalibrated(self, wayPoint, move_speed, tool_length):
+        # define some key way points of the circle
+        circle_radius = tool_length*math.sin(math.pi/6)
+        x_start_position = self.positioning_pose.position.x
+        x_end_position = self.positioning_pose.position.x
+        y_start_position = self.positioning_pose.position.y - circle_radius
+        y_end_position = self.positioning_pose.position.y + circle_radius
+        rolls_start_position = 7*math.pi/6
+        rolls_end_position = 5*math.pi/6
+        pitch_start_position = 0
+        pitch_end_position = 0
+        number_of_interpolation = 100
+        curr_yaw = 0
+
+        # the first half circle
+        x_positions = [x_start_position, x_start_position+circle_radius, x_end_position]
+        y_positions = [y_start_position, y_start_position+circle_radius, y_end_position]
+        rolls = [rolls_start_position, math.pi, rolls_end_position]
+        pitches = [pitch_start_position, math.pi/6, pitch_end_position]
+
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        g = interpolate.interp1d(y_positions, x_positions, kind = 'quadratic')
+        y_positions_new = np.linspace(y_start_position, y_end_position, number_of_interpolation)
+        rolls_new = np.linspace(rolls_start_position, rolls_end_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = g(y_positions_new)[i]
+            pose.position.y = y_positions_new[i]
+            pose.position.z = self.positioning_pose.position.z-0.3*circle_radius
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+
+        # the second half circle
+        
+        x_positions = [x_end_position, x_end_position-circle_radius, x_start_position]
+        y_positions = [y_end_position, y_end_position-circle_radius, y_start_position]
+        rolls = [rolls_end_position, math.pi, rolls_start_position]
+        pitches = [pitch_end_position, -math.pi/6, pitch_start_position]
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        g = interpolate.interp1d(y_positions, x_positions, kind = 'quadratic')
+        y_positions_new = np.linspace(y_end_position, y_start_position, number_of_interpolation)
+        rolls_new = np.linspace(rolls_end_position, rolls_start_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = g(y_positions_new)[i]
+            pose.position.y = y_positions_new[i]
+            pose.position.z = self.positioning_pose.position.z-0.3*circle_radius
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+        
 
     # below are some modularized massage patterns:
 
@@ -368,7 +465,7 @@ class LowLevelMotion(object):
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
 
-    def circularMotion(self, wayPoints, lift_height, move_speed):
+    def circularMotion(self, wayPoints, lift_height, move_speed, calibrated):
         counter = 0
         self.moveToPoint(wayPoints[0], move_speed)
         self.positioning_the_endpoint_to_force(10)
@@ -377,7 +474,11 @@ class LowLevelMotion(object):
             # move to the position specified by the desired force
             self.positioning_the_endpoint_to_force(5)
             # move a circle
-            self.moveACircle(self.positioning_pose, move_speed+0.05)
+            if calibrated:
+                tool_length = 0.05
+                self.moveACircleCalibrated(self.positioning_pose, move_speed+0.05, tool_length)
+            if not calibrated:
+                self.moveACircle(self.positioning_pose, move_speed+0.05)
             # lift up the arm
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
@@ -418,11 +519,11 @@ if __name__ == '__main__':
         # configure the force press issue
         #arm.prePress(wayPoint1)
         # start another massage pattern
-        arm.armVibrate(wayPoints, lift_height, move_speed, press_duration)
+        #arm.armVibrate(wayPoints, lift_height, move_speed, press_duration)
 
         # configure the force press issue
         arm.prePress(wayPoint1)
         # start another massage pattern
-        arm.circularMotion(wayPoints, lift_height, move_speed)
+        arm.circularMotion(wayPoints, lift_height, move_speed, True)
     except rospy.ROSInterruptException:
         pass
