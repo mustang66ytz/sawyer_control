@@ -78,10 +78,10 @@ class LowLevelMotion(object):
         rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
 
         # move the robot based on joint command
-    def basicTrajMove(self, positions, speed, traj_length):
+    def basicTrajMove(self, positions, speed, traj_length, speed_rate):
         pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
         sub = rospy.Subscriber('/robot/joint_states', JointState, self.joints_callback)
-        rate = rospy.Rate(40)
+        rate = rospy.Rate(speed_rate)
         # define the speed publisher
         pub_speed_ratio = rospy.Publisher('/robot/limb/right/set_speed_ratio', Float64, latch=True, queue_size=10)
 
@@ -155,7 +155,7 @@ class LowLevelMotion(object):
         start_time = rospy.get_time()
         end_time = rospy.get_time()
         rospy.loginfo(">>>>>>>>>> moving the arm to zero joint position >>>>>>>>>>>")
-        while end_time-start_time<5:
+        while end_time-start_time<8:
             pub.publish(command)
             end_time = rospy.get_time()
 
@@ -281,6 +281,7 @@ class LowLevelMotion(object):
 
     def moveACircle(self, wayPoint, move_speed):
         # define some key way points of the circle
+        speed_rate = 40
         rolls_start_position = 7*math.pi/6
         rolls_end_position = 5*math.pi/6
         pitch_start_position = 0
@@ -307,7 +308,7 @@ class LowLevelMotion(object):
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
             circle_points_joints.append(self.waypointToJoint(pose))
-        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
 
         # the second half circle
         rolls = [rolls_end_position, math.pi, rolls_start_position]
@@ -328,10 +329,11 @@ class LowLevelMotion(object):
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
             circle_points_joints.append(self.waypointToJoint(pose))
-        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
 
     def moveACircleCalibrated(self, wayPoint, move_speed, tool_length):
         # define some key way points of the circle
+        speed_rate = 40
         circle_radius = tool_length*math.sin(math.pi/6)
         x_start_position = self.positioning_pose.position.x
         x_end_position = self.positioning_pose.position.x
@@ -341,7 +343,7 @@ class LowLevelMotion(object):
         rolls_end_position = 5*math.pi/6
         pitch_start_position = 0
         pitch_end_position = 0
-        number_of_interpolation = 100
+        number_of_interpolation = 150
         curr_yaw = 0
 
         # the first half circle
@@ -368,7 +370,7 @@ class LowLevelMotion(object):
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
             circle_points_joints.append(self.waypointToJoint(pose))
-        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
 
         # the second half circle
         
@@ -394,7 +396,7 @@ class LowLevelMotion(object):
             pose.orientation.z = end[2]
             pose.orientation.w = end[3]
             circle_points_joints.append(self.waypointToJoint(pose))
-        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
         
 
     # below are some modularized massage patterns:
@@ -467,6 +469,7 @@ class LowLevelMotion(object):
 
     def circularMotion(self, wayPoints, lift_height, move_speed, calibrated):
         counter = 0
+        repetition = 2
         self.moveToPoint(wayPoints[0], move_speed)
         self.positioning_the_endpoint_to_force(10)
         for wayPoint in wayPoints:
@@ -476,13 +479,45 @@ class LowLevelMotion(object):
             # move a circle
             if calibrated:
                 tool_length = 0.05
-                self.moveACircleCalibrated(self.positioning_pose, move_speed+0.05, tool_length)
+                for i in range(0,repetition):
+                    self.moveACircleCalibrated(self.positioning_pose, move_speed, tool_length)
+                    if not i == repetition-1:
+                        self.lift(wayPoints[counter], 0.01)
+                        self.positioning_the_endpoint_to_force(5)
+                    
             if not calibrated:
                 self.moveACircle(self.positioning_pose, move_speed+0.05)
             # lift up the arm
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
         
+    def moveTraj(self, x_start, key_poses_x, x_end, y_start, key_poses_y, y_end, move_speed, z, orientation):
+        number_of_interpolation = 600
+        speed_rate = 20
+        x_waypoints = [x_start]
+        y_waypoints = [y_start]
+        for key_pose_x in key_poses_x:
+            x_waypoints.append(key_pose_x)
+        x_waypoints.append(x_end)
+        for key_pose_y in key_poses_y:
+            y_waypoints.append(key_pose_y)
+        y_waypoints.append(y_end)
+        f = interpolate.interp1d(y_waypoints, x_waypoints, kind='quadratic')
+        y_waypoints_new = np.linspace(y_start, y_end, number_of_interpolation)
+        trajectory = []
+
+        for i in range (1,len(y_waypoints_new)-1):
+            pose = Pose()
+            pose.position.x = f(y_waypoints_new)[i]
+            pose.position.y = y_waypoints_new[i]
+            pose.position.z = z
+            pose.orientation.x = orientation[0]
+            pose.orientation.y = orientation[1]
+            pose.orientation.z = orientation[2]
+            pose.orientation.w = orientation[3]
+            trajectory.append(self.waypointToJoint(pose))
+        self.basicPositionMove(trajectory[0], move_speed)
+        self.basicTrajMove(trajectory, move_speed, len(trajectory)-1, speed_rate)
 
 if __name__ == '__main__':
     try:
@@ -525,5 +560,16 @@ if __name__ == '__main__':
         arm.prePress(wayPoint1)
         # start another massage pattern
         arm.circularMotion(wayPoints, lift_height, move_speed, True)
+
+        # move the arm following a trajectory
+        x_start = 0
+        x_end = 0
+        y_start = 0.6
+        y_end = 0.8
+        key_poses_x = [-0.2]
+        key_poses_y = [0.7]
+        z = 0.05
+        orientation = [1, 0, 0, 0]
+        #arm.moveTraj(x_start, key_poses_x, x_end, y_start, key_poses_y, y_end, move_speed, z, orientation)
     except rospy.ROSInterruptException:
         pass
