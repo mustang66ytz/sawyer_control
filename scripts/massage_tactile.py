@@ -80,7 +80,7 @@ class LowLevelMotionWithTactileSensor(object):
         end_time = rospy.get_time()
         while control_diff_record>threshold:
             end_time = rospy.get_time()
-            if end_time-start_time>1.5:
+            if end_time-start_time>5:
                 break
             pub.publish(command)
             for x,y in zip(self.jointAngles, command.position):
@@ -88,6 +88,27 @@ class LowLevelMotionWithTactileSensor(object):
             control_diff_record = control_diff_temp
             control_diff_temp = 0.0
             rate.sleep()
+
+        rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
+    
+    # move the robot based on joint command
+    def basicPositionMoveForPositioning(self, pos, speed):
+        pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
+        sub = rospy.Subscriber('/robot/joint_states', JointState, self.joints_callback)
+        rate = rospy.Rate(180)
+        # define the speed publisher
+        pub_speed_ratio = rospy.Publisher('/robot/limb/right/set_speed_ratio', Float64, latch=True, queue_size=10)
+
+        command = JointCommand()
+        command.names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
+        command.position = [pos['right_j0'], pos['right_j1'], pos['right_j2'], pos['right_j3'], pos['right_j4'], pos['right_j5'], pos['right_j6']]
+        command.mode = 1
+        # customize the value to change speed
+        pub_speed_ratio.publish(speed)
+        # terminate the control once the arm moved to the desired joint space within the threshold
+        
+        pub.publish(command)
+        rate.sleep()
 
         rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
 
@@ -103,20 +124,15 @@ class LowLevelMotionWithTactileSensor(object):
         command.mode = 1
         # customize the value to change speed
         pub_speed_ratio.publish(speed)
-        
-        control_diff_record = 10.0
-        control_diff_temp = 0.0
-        threshold = 0.015
-
         # terminate the control once the arm moved to the desired joint space within the threshold
         counter = 0
-        while control_diff_record>threshold and counter<traj_length-1:
+        while counter<traj_length-1:
             command.position = [positions[counter]['right_j0'], positions[counter]['right_j1'], positions[counter]['right_j2'], positions[counter]['right_j3'], positions[counter]['right_j4'], positions[counter]['right_j5'], positions[counter]['right_j6']]
             pub.publish(command)
-            for x,y in zip(self.jointAngles, command.position):
-                control_diff_temp = abs(x-y) + control_diff_temp
-            control_diff_record = control_diff_temp
-            control_diff_temp = 0.0
+            #for x,y in zip(self.jointAngles, command.position):
+                #control_diff_temp = abs(x-y) + control_diff_temp
+            #control_diff_record = control_diff_temp
+            #control_diff_temp = 0.0
             rate.sleep()
             counter = counter+1
 
@@ -126,7 +142,7 @@ class LowLevelMotionWithTactileSensor(object):
     def lowerArmBasicMove(self, cur_pos, speed):
         # define some parameters:
         frequency = 100 # customize this to change the vibration speed
-        repetation = 20
+        repetation = 10
 
         pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
         rate = rospy.Rate(frequency)
@@ -173,7 +189,7 @@ class LowLevelMotionWithTactileSensor(object):
             end_time = rospy.get_time()
     
     # move the arm to the specified position with the specifies speed
-    def moveToPoint(self, position, speed):
+    def moveToPoint(self, position, speed, positioning):
         pose = Pose()
         pose.position.x = position[0]
         pose.position.y = position[1]
@@ -183,10 +199,10 @@ class LowLevelMotionWithTactileSensor(object):
         pose.orientation.z = position[5]
         pose.orientation.w = position[6]
         # call the inverse kinematics function
-        self.ik(pose, speed)
+        self.ik(pose, speed, positioning)
 
     # inverse kinematics function integrating inverse kinematics service and send the joint angles to basicPositionMove function to publish joint commands
-    def ik(self, pose, speed):
+    def ik(self, pose, speed, positioning):
         iksvc = rospy.ServiceProxy('ExternalTools/right/PositionKinematicsNode/IKService', SolvePositionIK)
         ikreq = SolvePositionIKRequest()
         hdr = Header(stamp=rospy.Time.now(), frame_id='base')
@@ -198,7 +214,10 @@ class LowLevelMotionWithTactileSensor(object):
         if (resp.result_type[0] > 0):
             limb_joints = dict(zip(resp.joints[0].name, resp.joints[0].position))
             rospy.loginfo(">>>>>>>>>> moving the arm >>>>>>>>>>")
-            self.basicPositionMove(limb_joints, speed)
+            if positioning:
+                self.basicPositionMoveForPositioning(limb_joints, speed)
+            else:
+                self.basicPositionMove(limb_joints, speed)
         else:
             rospy.logerr("INVALID POSE - No Valid Joint Solution Found.")
             return False
@@ -236,7 +255,7 @@ class LowLevelMotionWithTactileSensor(object):
         depth_step = 0.0005
         while self.curr_force+self.force_threshold<ref_force:
             desired_pos = [cur_pos[0], cur_pos[1], cur_depth-depth_step, cur_pos[3], cur_pos[4], cur_pos[5], cur_pos[6]]
-            self.moveToPoint(desired_pos, speed)
+            self.moveToPoint(desired_pos, speed, True)
             cur_depth = cur_depth-depth_step
         self.correct_depth = cur_depth
         rospy.logwarn("reached the desired force")
@@ -244,7 +263,7 @@ class LowLevelMotionWithTactileSensor(object):
     # lift the robot arm after massaging a point
     def lift(self, cur_waypoint, height):
         des_waypoint = [cur_waypoint[0], cur_waypoint[1], cur_waypoint[2]+height, cur_waypoint[3], cur_waypoint[4], cur_waypoint[5], cur_waypoint[6]]
-        self.moveToPoint(des_waypoint, 0.2)
+        self.moveToPoint(des_waypoint, 0.2, False)
     
     # convert roll pitch yaw to quaternion
     def to_quaternion(self, roll, pitch, yaw):
@@ -266,42 +285,208 @@ class LowLevelMotionWithTactileSensor(object):
     def displacement(self, time):
         disp = 0.1667*math.pi*math.sin(time)
         return disp
+    
+    def endpoint_callback(self, data):
+        self.positioning_pose = data.pose
+
+    # positioning the end effector according to the desired force
+    def positioning_the_endpoint_to_force(self, pos, force, speed):
+        rospy.loginfo(">>>>>>>>>> exerting force >>>>>>>>>>")
+        self.findDepthFromForce(pos, force, speed)
+        sub = rospy.Subscriber('/robot/limb/right/endpoint_state', EndpointState, self.endpoint_callback)
+        rospy.sleep(0.5)
+
+    def moveACircle(self, wayPoint, move_speed):
+        # define some key way points of the circle
+        speed_rate = 20
+        rolls_start_position = 7*math.pi/6
+        rolls_end_position = 5*math.pi/6
+        pitch_start_position = 0
+        pitch_end_position = 0
+        number_of_interpolation = 30
+        curr_yaw = 0
+        # the first half circle
+        rolls = [rolls_start_position, math.pi, rolls_end_position]
+        pitches = [pitch_start_position, math.pi/6, pitch_end_position]
+
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        rolls_new = np.linspace(rolls_start_position, rolls_end_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = self.positioning_pose.position.x
+            pose.position.y = self.positioning_pose.position.y
+            pose.position.z = self.positioning_pose.position.z
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
+
+        # the second half circle
+        rolls = [rolls_end_position, math.pi, rolls_start_position]
+        pitches = [pitch_end_position, -math.pi/6, pitch_start_position]
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        rolls_new = np.linspace(rolls_end_position, rolls_start_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = self.positioning_pose.position.x
+            pose.position.y = self.positioning_pose.position.y
+            pose.position.z = self.positioning_pose.position.z
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
 
 
+    def moveACircleCalibrated(self, wayPoint, move_speed, tool_length):
+        # define some key way points of the circle
+        speed_rate = 150
+        circle_radius = tool_length*math.sin(math.pi/6)
+        x_start_position = self.positioning_pose.position.x
+        x_end_position = self.positioning_pose.position.x
+        y_start_position = self.positioning_pose.position.y - circle_radius
+        y_end_position = self.positioning_pose.position.y + circle_radius
+        rolls_start_position = 7*math.pi/6
+        rolls_end_position = 5*math.pi/6
+        pitch_start_position = 0
+        pitch_end_position = 0
+        number_of_interpolation = 400
+        curr_yaw = 0
+
+        # the first half circle
+        x_positions = [x_start_position, x_start_position+circle_radius, x_end_position]
+        y_positions = [y_start_position, y_start_position+circle_radius, y_end_position]
+        rolls = [rolls_start_position, math.pi, rolls_end_position]
+        pitches = [pitch_start_position, math.pi/6, pitch_end_position]
+
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        g = interpolate.interp1d(y_positions, x_positions, kind = 'quadratic')
+        y_positions_new = np.linspace(y_start_position, y_end_position, number_of_interpolation)
+        rolls_new = np.linspace(rolls_start_position, rolls_end_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = g(y_positions_new)[i]
+            pose.position.y = y_positions_new[i]
+            pose.position.z = self.positioning_pose.position.z+0.1*circle_radius
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
+
+        # the second half circle
+        
+        x_positions = [x_end_position, x_end_position-circle_radius, x_start_position]
+        y_positions = [y_end_position, y_end_position-circle_radius, y_start_position]
+        rolls = [rolls_end_position, math.pi, rolls_start_position]
+        pitches = [pitch_end_position, -math.pi/6, pitch_start_position]
+        f = interpolate.interp1d(rolls, pitches, kind='quadratic')
+        g = interpolate.interp1d(y_positions, x_positions, kind = 'quadratic')
+        y_positions_new = np.linspace(y_end_position, y_start_position, number_of_interpolation)
+        rolls_new = np.linspace(rolls_end_position, rolls_start_position, number_of_interpolation)
+        i = 0
+        circle_points_joints = []
+        
+        for i in range (0,len(rolls_new)-1):
+            end = self.to_quaternion(rolls_new[i], f(rolls_new)[i], curr_yaw)
+            pose = Pose()
+            pose.position.x = g(y_positions_new)[i]
+            pose.position.y = y_positions_new[i]
+            pose.position.z = self.positioning_pose.position.z+0.1*circle_radius
+            pose.orientation.x = end[0]
+            pose.orientation.y = end[1]
+            pose.orientation.z = end[2]
+            pose.orientation.w = end[3]
+            circle_points_joints.append(self.waypointToJoint(pose))
+        self.basicTrajMove(circle_points_joints, move_speed, len(rolls_new), speed_rate)
 
     # below are some modularized massage patterns:
     # normal press pattern with the waypoints, move_speed, and force specified
     def normalPress(self, wayPoints, lift_height, move_speed):
-        force = [80, 80, 80, 80]
+        force = [30, 30, 30, 30]
 
-        self.moveToPoint(wayPoints[0], move_speed)
+        self.moveToPoint(wayPoints[0], move_speed, False)
         self.findDepthFromForce(wayPoints[0], force[0], move_speed-0.1)
         rospy.sleep(1)
         self.lift(wayPoints[0], lift_height)
 
-        self.moveToPoint(wayPoints[1], move_speed)
+        self.moveToPoint(wayPoints[1], move_speed, False)
         self.findDepthFromForce(wayPoints[1], force[1], move_speed-0.1)
         rospy.sleep(1)
         self.lift(wayPoints[1], lift_height)
 
-        self.moveToPoint(wayPoints[2], move_speed)
+        self.moveToPoint(wayPoints[2], move_speed, False)
         self.findDepthFromForce(wayPoints[2], force[2], move_speed-0.1)
         rospy.sleep(1)
         self.lift(wayPoints[2], lift_height)
 
-        self.moveToPoint(wayPoints[3], move_speed)
+        self.moveToPoint(wayPoints[3], move_speed, False)
         self.findDepthFromForce(wayPoints[3], force[3], move_speed-0.1)
         rospy.sleep(1)
         self.lift(wayPoints[3], lift_height)
 
+    # high-frequency, high-speed lower arm padding pattern
+    def armVibrate(self, wayPoints, lift_height, move_speed):
+        # start the high speed vibrating massage:
+        counter = 0
+        for wayPoint in wayPoints:
+            self.moveToPoint(wayPoint, move_speed, False)
+            # move to the position specified by the desired force
+            self.positioning_the_endpoint_to_force(wayPoint, 30, move_speed-0.1)
+            # convert the waypoint to joint angles
+            temp = self.waypointToJoint(self.positioning_pose)
+            # vibrate the lower arm
+            self.lowerArmBasicMove(temp, move_speed*2)
+            # lift up the arm
+            self.lift(wayPoints[counter], 0.05)
+            counter = counter+1
+    
+    def circularMotion(self, wayPoints, lift_height, move_speed, calibrated):
+        counter = 0
+        repetition = 2
+        for wayPoint in wayPoints:
+            self.moveToPoint(wayPoint, move_speed, False)
+            # move to the position specified by the desired force
+            self.positioning_the_endpoint_to_force(wayPoint, 25, move_speed-0.1)
+            # move a circle
+            if calibrated:
+                tool_length = 0.05
+                for i in range(0,repetition):
+                    self.moveACircleCalibrated(self.positioning_pose, move_speed, tool_length)
+                    if not i == repetition-1:
+                        self.lift(wayPoints[counter], 0.01)
+                        self.positioning_the_endpoint_to_force(wayPoint, 25, move_speed-0.1)
+                    
+            if not calibrated:
+                self.moveACircle(self.positioning_pose, move_speed+0.05)
+            # lift up the arm
+            self.lift(wayPoints[counter], 0.05)
+            counter = counter+1
+
 if __name__ == '__main__':
     try:
         # define some way points:
-        wayPoint1 = [0, 0.6, 0.0, 1, 0, 0, 0]
+        wayPoint1 = [0, 0.6, 0.05, 1, 0, 0, 0]
         wayPointTemp = [0, 0.7, 0.0, 1, 0, 0, 0]
-        wayPoint2 = [0, 0.65, 0.0, 1, 0, 0, 0]
-        wayPoint3 = [-0.2, 0.8, 0.0, 1, 0, 0, 0]
-        wayPoint4 = [-0.2, 0.6, 0.0, 1, 0, 0, 0]
+        wayPoint2 = [0, 0.65, 0.05, 1, 0, 0, 0]
+        wayPoint3 = [-0.2, 0.8, 0.05, 1, 0, 0, 0]
+        wayPoint4 = [-0.2, 0.6, 0.05, 1, 0, 0, 0]
         wayPoints = [wayPoint1, wayPoint2, wayPoint3, wayPoint4]
 
         # define some pattern parameters:
@@ -317,6 +502,8 @@ if __name__ == '__main__':
         arm.movetozero()
 
         # start the massage pattern:
-        arm.normalPress(wayPoints, lift_height, move_speed)
+        #arm.normalPress(wayPoints, lift_height, move_speed)
+        #arm.armVibrate(wayPoints, lift_height, move_speed)
+        arm.circularMotion(wayPoints, lift_height, move_speed, True)
     except rospy.ROSInterruptException:
         pass

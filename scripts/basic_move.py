@@ -562,16 +562,16 @@ if __name__ == '__main__':
         # initialize a LowLevelMotion object
         arm = LowLevelMotion()
         # test the acceleration move:
-        rospy.init_node('arm_low_level_control', anonymous=True)
-        zero_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        arm.basicAccelerationMove(zero_pose, move_speed)
+        #rospy.init_node('arm_low_level_control', anonymous=True)
+        #zero_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        #arm.basicAccelerationMove(zero_pose, move_speed)
         # move the arm to zero position first
-        #arm.movetozero()
+        arm.movetozero()
         # configure the force press issue
         #arm.prePress(wayPoint1)
 
         # start the massage pattern:
-        #arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
+        arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
 
         # configure the force press issue
         #arm.prePress(wayPoint1)
