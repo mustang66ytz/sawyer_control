@@ -77,6 +77,30 @@ class LowLevelMotion(object):
 
         rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
 
+    def basicAccelerationMove(self, pos, speed):
+        pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
+        pub_speed_ratio = rospy.Publisher('/robot/limb/right/set_speed_ratio', Float64, latch=True, queue_size=10)
+        sub = rospy.Subscriber('/robot/joint_states', JointState, self.joints_callback)
+        command = JointCommand()
+        command.names = ['right_j0', 'right_j1', 'right_j2', 'right_j3', 'right_j4', 'right_j5', 'right_j6']
+        command.position = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+        command.acceleration = [0.3, 0.05, 0.05, 0.05, 0.05, 0.05, 0.1]
+        command.mode = 1
+        #pub_speed_ratio.publish(0.2)
+        rate = rospy.Rate(10)
+        control_diff_record = 10.0
+        control_diff_temp = 0.0
+        threshold = 0.02
+        # terminate the control once the arm moved to the desired joint space within the threshold
+        while control_diff_record>threshold:
+            pub.publish(command)
+            for x,y in zip(self.jointAngles, command.acceleration):
+                control_diff_temp = abs(x-y) + control_diff_temp
+            control_diff_record = control_diff_temp
+            control_diff_temp = 0.0
+            rate.sleep()
+
+        rospy.loginfo(">>>>>>>>>> The robot is at the target position <<<<<<<<<<:")
         # move the robot based on joint command
     def basicTrajMove(self, positions, speed, traj_length, speed_rate):
         pub = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=10)
@@ -258,7 +282,7 @@ class LowLevelMotion(object):
         rospy.sleep(1)
         self.exitForceControl()
 
-    # convert roll pitvh yaw to quaternion
+    # convert roll pitch yaw to quaternion
     def to_quaternion(self, roll, pitch, yaw):
         cy = math.cos(0.5*yaw)
         sy = math.sin(0.5*yaw)
@@ -537,8 +561,12 @@ if __name__ == '__main__':
 
         # initialize a LowLevelMotion object
         arm = LowLevelMotion()
+        # test the acceleration move:
+        rospy.init_node('arm_low_level_control', anonymous=True)
+        zero_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        arm.basicAccelerationMove(zero_pose, move_speed)
         # move the arm to zero position first
-        arm.movetozero()
+        #arm.movetozero()
         # configure the force press issue
         #arm.prePress(wayPoint1)
 
@@ -557,9 +585,9 @@ if __name__ == '__main__':
         #arm.armVibrate(wayPoints, lift_height, move_speed, press_duration)
 
         # configure the force press issue
-        arm.prePress(wayPoint1)
+        #arm.prePress(wayPoint1)
         # start another massage pattern
-        arm.circularMotion(wayPoints, lift_height, move_speed, True)
+        #arm.circularMotion(wayPoints, lift_height, move_speed, True)
 
         # move the arm following a trajectory
         x_start = 0
