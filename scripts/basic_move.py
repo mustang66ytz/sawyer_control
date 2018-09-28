@@ -427,23 +427,28 @@ class LowLevelMotion(object):
 
     # normal press pattern with the waypoints, move_speed, and force specified
     def normalPress(self, wayPoints, lift_height, move_speed, press_duration):
-        force = [40, 30, 20, 30]
-
+        force = [20, 30, 20, 30]
         self.moveToPoint(wayPoints[0], move_speed)
         self.forcePress(force[0], press_duration)
-        self.lift(wayPoint1, lift_height)
 
-        self.moveToPoint(wayPoints[1], move_speed)
-        self.forcePress(force[1], press_duration)
+        for i in range(4):
+            self.moveToPoint(wayPoints[i], move_speed)
+            self.forcePress(force[i], press_duration)
+            self.lift(wayPoints[i], lift_height)
 
-        self.moveToPoint(wayPoints[2], move_speed)
-        self.forcePress(force[2], press_duration)
+    # slow-speed repeated normal press
+    def repeatedPress(self, wayPoints, lift_height, move_speed, repetition, press_duration):
+        force  = [20, 20, 20, 20]
+        self.moveToPoint(wayPoints[0], move_speed)
+        self.forcePress(force[0], press_duration)
 
-        self.moveToPoint(wayPoints[3], move_speed)
-        self.forcePress(force[3], press_duration)
-        self.lift(wayPoint4, move_speed)
+        for j in range(4):
+            for i in range(repetition):
+                self.moveToPoint(wayPoints[j], move_speed)
+                self.forcePress(force[j], press_duration)
+                self.lift(wayPoints[j], 0)
 
-    # repeated rapid-paced normal press
+    # repeated normal press
     def rapidRepeatedPress(self, wayPoints, lift_height, move_speed, press_duration):
         press_wayPoints = []
         release_wayPoints = wayPoints 
@@ -486,7 +491,7 @@ class LowLevelMotion(object):
             # convert the waypoint to joint angles
             temp = self.waypointToJoint(self.positioning_pose)
             # vibrate the lower arm
-            self.lowerArmBasicMove(temp, move_speed*2)
+            self.lowerArmBasicMove(temp, move_speed)
             # lift up the arm
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
@@ -546,8 +551,8 @@ class LowLevelMotion(object):
 if __name__ == '__main__':
     try:
         # define some way points:
+        wayPoint0 = [0, 0.6, 0.06, 1, 0, 0, 0]
         wayPoint1 = [0, 0.6, 0.05, 1, 0, 0, 0]
-        wayPointTemp = [0, 0.7, 0.05, 1, 0, 0, 0]
         wayPoint2 = [0, 0.8, 0.05, 1, 0, 0, 0]
         wayPoint3 = [-0.2, 0.8, 0.05, 1, 0, 0, 0]
         wayPoint4 = [-0.2, 0.6, 0.05, 1, 0, 0, 0]
@@ -568,11 +573,13 @@ if __name__ == '__main__':
         # move the arm to zero position first
         arm.movetozero()
         # configure the force press issue
-        #arm.prePress(wayPoint1)
+        #arm.prePress(wayPoint0)
 
         # start the massage pattern:
-        arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
+        #arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
 
+        # start the repeated normal press
+        #arm.repeatedPress(wayPoints, 0.04, move_speed, 5, 1)
         # configure the force press issue
         #arm.prePress(wayPoint1)
 
@@ -580,12 +587,12 @@ if __name__ == '__main__':
         #arm.rapidRepeatedPress(wayPoints, lift_height-0.06, move_speed, press_duration-1)
 
         # configure the force press issue
-        #arm.prePress(wayPoint1)
+        arm.prePress(wayPoint1)
         # start another massage pattern
-        #arm.armVibrate(wayPoints, lift_height, move_speed, press_duration)
+        arm.armVibrate(wayPoints, lift_height, move_speed, press_duration)
 
         # configure the force press issue
-        #arm.prePress(wayPoint1)
+        arm.prePress(wayPoint1)
         # start another massage pattern
         #arm.circularMotion(wayPoints, lift_height, move_speed, True)
 

@@ -421,25 +421,21 @@ class LowLevelMotionWithTactileSensor(object):
     def normalPress(self, wayPoints, lift_height, move_speed):
         force = [30, 30, 30, 30]
 
-        self.moveToPoint(wayPoints[0], move_speed, False)
-        self.findDepthFromForce(wayPoints[0], force[0], move_speed-0.1)
-        rospy.sleep(1)
-        self.lift(wayPoints[0], lift_height)
-
-        self.moveToPoint(wayPoints[1], move_speed, False)
-        self.findDepthFromForce(wayPoints[1], force[1], move_speed-0.1)
-        rospy.sleep(1)
-        self.lift(wayPoints[1], lift_height)
-
-        self.moveToPoint(wayPoints[2], move_speed, False)
-        self.findDepthFromForce(wayPoints[2], force[2], move_speed-0.1)
-        rospy.sleep(1)
-        self.lift(wayPoints[2], lift_height)
-
-        self.moveToPoint(wayPoints[3], move_speed, False)
-        self.findDepthFromForce(wayPoints[3], force[3], move_speed-0.1)
-        rospy.sleep(1)
-        self.lift(wayPoints[3], lift_height)
+        for i in range(4):
+            self.moveToPoint(wayPoints[i], move_speed, False)
+            self.findDepthFromForce(wayPoints[i], force[i], move_speed-0.1)
+            rospy.sleep(1)
+            self.lift(wayPoints[i], lift_height)
+    
+    # repeated normal press
+    def repeatedPress(self, wayPoints, lift_height, move_speed, repetition):
+        force = [30, 30, 30, 30]
+        for i in range(4):
+            for j in range(5):
+                self.moveToPoint(wayPoints[i], move_speed, False)
+                self.findDepthFromForce(wayPoints[i], force[i], move_speed-0.1)
+                rospy.sleep(1)
+                self.lift(wayPoints[i], lift_height)
 
     # high-frequency, high-speed lower arm padding pattern
     def armVibrate(self, wayPoints, lift_height, move_speed):
@@ -452,7 +448,7 @@ class LowLevelMotionWithTactileSensor(object):
             # convert the waypoint to joint angles
             temp = self.waypointToJoint(self.positioning_pose)
             # vibrate the lower arm
-            self.lowerArmBasicMove(temp, move_speed*2)
+            self.lowerArmBasicMove(temp, move_speed)
             # lift up the arm
             self.lift(wayPoints[counter], 0.05)
             counter = counter+1
@@ -502,8 +498,9 @@ if __name__ == '__main__':
         arm.movetozero()
 
         # start the massage pattern:
-        #arm.normalPress(wayPoints, lift_height, move_speed)
-        #arm.armVibrate(wayPoints, lift_height, move_speed)
-        arm.circularMotion(wayPoints, lift_height, move_speed, True)
+        arm.normalPress(wayPoints, lift_height, move_speed)
+        arm.repeatedPress(wayPoints, 0, move_speed, 5)
+        arm.armVibrate(wayPoints, lift_height, move_speed)
+        #arm.circularMotion(wayPoints, lift_height, move_speed, True)
     except rospy.ROSInterruptException:
         pass
