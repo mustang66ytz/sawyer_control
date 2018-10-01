@@ -576,7 +576,7 @@ if __name__ == '__main__':
         #arm.prePress(wayPoint0)
 
         # start the massage pattern:
-        #arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
+        arm.normalPress(wayPoints, lift_height, move_speed, press_duration)
 
         # start the repeated normal press
         #arm.repeatedPress(wayPoints, 0.04, move_speed, 5, 1)
@@ -594,7 +594,7 @@ if __name__ == '__main__':
         # configure the force press issue
         arm.prePress(wayPoint1)
         # start another massage pattern
-        #arm.circularMotion(wayPoints, lift_height, move_speed, True)
+        arm.circularMotion(wayPoints, lift_height, move_speed, True)
 
         # move the arm following a trajectory
         x_start = 0
